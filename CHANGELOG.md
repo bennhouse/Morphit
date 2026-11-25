@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Settings: switching tabs resizes the window around its centre, so the tab buttons stay put.
+- No scroll bars in lists (with "Always show" they took space and changed the lists' width).
+- The icon next to the title turns clockwise while converting, easing in at the start and out at the end.
+- Templates: the +, duplicate and − buttons are the same size, aligned and evenly spaced; the "Advanced settings" title opens and closes the group too.
+- No folder button in the title bar: where files go and whether originals go to the Trash are chosen only in Settings › General.
+- Undo after a conversion: a button rises into the status bar; it deletes the new files and puts back the originals from the Trash.
+- Video quality "Custom bitrate": a slider in kbps, with a range that follows the resolution, frame rate and codec (and labels from small file to very high quality).
+- The "HEVC (MP4)" format is gone: MP4 with the HEVC codec does the same. Saved HEVC templates become MP4 + HEVC; the unchanged built-in one is removed.
+- Templates: + , duplicate and − only. − deletes any template, built-in ones too, at once; ⌘Z puts it back.
+
 ## 1.0
 
 First release.

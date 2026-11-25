@@ -9,6 +9,8 @@ struct MorphitApp: App {
         Window("Morphit", id: "main") {
             ContentView()
                 .environment(model)
+                // No scroll bars anywhere: with "Always show" they took space and lists changed width.
+                .scrollIndicators(.never)
         }
         .defaultSize(width: 820, height: 600)
         .windowToolbarStyle(.unified)

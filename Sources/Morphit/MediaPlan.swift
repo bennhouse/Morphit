@@ -176,8 +176,6 @@ struct MediaPlan {
         let codec: VideoCodec?   // nil = copy
         if let chosen = s.codec, fmt.videoCodecs.contains(chosen) {
             codec = (chosen.probeName == v.codec && !mustEncode) ? nil : chosen
-        } else if fmt == .hevc {
-            codec = (v.codec == "hevc" && !mustEncode) ? nil : .hevc
         } else if containerTakes && !mustEncode {
             codec = nil
         } else if let src = srcCodec, fmt.videoCodecs.contains(src) {
@@ -194,7 +192,7 @@ struct MediaPlan {
         } else {
             p.args += ["-c:v", "copy"]
         }
-        if codec == .hevc || (codec == nil && v.codec == "hevc"), fmt == .mp4 || fmt == .hevc || fmt == .mov {
+        if codec == .hevc || (codec == nil && v.codec == "hevc"), fmt == .mp4 || fmt == .mov {
             p.args += ["-tag:v", "hvc1"]   // QuickTime and iOS play HEVC only with this tag
         }
 
@@ -203,7 +201,7 @@ struct MediaPlan {
         if s.audio != .remove, !tracks.isEmpty {
             let copyable: Set<String>
             switch fmt {
-            case .mp4, .hevc: copyable = ["aac", "mp3", "alac", "ac3", "eac3"]
+            case .mp4: copyable = ["aac", "mp3", "alac", "ac3", "eac3"]
             case .mov: copyable = ["aac", "alac", "mp3", "ac3", "pcm_s16le", "pcm_s24le", "pcm_s16be", "pcm_s24be"]
             case .webm: copyable = ["opus", "vorbis"]
             default: copyable = []   // mkv: everything
@@ -239,7 +237,7 @@ struct MediaPlan {
                 switch fmt {
                 case .mkv:
                     p.args += ["-map", "0:\(sub.index)", "-c:s:\(i)", "copy"]
-                case .mp4, .hevc, .mov where text.contains(sub.codec):
+                case .mp4, .mov where text.contains(sub.codec):
                     p.args += ["-map", "0:\(sub.index)", "-c:s:\(i)", "mov_text"]
                 default: break
                 }
@@ -248,7 +246,7 @@ struct MediaPlan {
         }
 
         p.args += s.keepMetadata ? ["-map_metadata", "0", "-map_chapters", "0"] : ["-map_metadata", "-1", "-map_chapters", "-1"]
-        if fmt == .mp4 || fmt == .hevc || fmt == .mov { p.args += ["-movflags", "+faststart"] }
+        if fmt == .mp4 || fmt == .mov { p.args += ["-movflags", "+faststart"] }
         p.args += [output.path]
         return p
     }
@@ -270,9 +268,16 @@ struct MediaPlan {
             let srcPixels = Double(max(1, v.width * v.height))
             target = Int(Double(b) * pow(Double(outPixels) / srcPixels, 0.75))
         }
+        // Custom bitrate: as chosen. With the resolution "same as source" it was chosen for 1080p,
+        // so it is scaled to the real picture size (by area^0.75, like the source bitrate above).
+        if s.quality == .custom, s.crf == nil, let k = s.bitrate {
+            var bits = Double(k) * 1000
+            if s.resolution == nil { bits *= pow(Double(outPixels) / BitrateRange.referencePixels, 0.75) }
+            target = Int(bits)
+        }
         let preset: (h264: Int, hevc: Int, av1: Int, vp9: Int, hw: Int) = {
             switch s.quality {
-            case .source, .high: return (18, 20, 26, 28, 70)
+            case .source, .high, .custom: return (18, 20, 26, 28, 70)
             case .medium: return (23, 25, 33, 34, 58)
             case .low: return (28, 30, 40, 40, 45)
             }

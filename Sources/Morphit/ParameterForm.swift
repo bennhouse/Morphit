@@ -18,7 +18,13 @@ struct ParameterForm: View {
         }
         Section {
             if collapsible {
-                DisclosureGroup("Advanced settings", isExpanded: $advancedOpen) { advanced }
+                DisclosureGroup(isExpanded: $advancedOpen) { advanced } label: {
+                    // The title opens and closes the group too, not only the arrow.
+                    Text("Advanced settings")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { withAnimation(.smooth(duration: 0.25)) { advancedOpen.toggle() } }
+                }
             } else {
                 advanced
             }
@@ -129,10 +135,19 @@ private struct VideoBase: View {
             .help("Same as source: the original codec is kept when \(f.title) can hold it (no re-encoding, no loss); otherwise \(f.videoCodecs[0].title).")
         }
         if f != .gif && t.video.codec != .prores {
-            Picker("Quality", selection: $t.video.quality) {
-                ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
+            Picker("Quality", selection: Binding(get: { t.video.quality }, set: { q in
+                t.video.quality = q
+                if q == .custom, t.video.bitrate == nil { t.video.bitrate = range.medium }
+            })) {
+                ForEach(VideoQuality.allCases) { q in
+                    if q == .custom { Divider() }
+                    Text(q.title).tag(q)
+                }
             }
-            .help("Same as source: the original's bitrate (the stream is copied when nothing else changes). The other levels use constant quality.")
+            .help("Same as source: the original's bitrate (the stream is copied when nothing else changes). High, Medium and Small file use constant quality. Custom bitrate: choose the kbps within a range that suits the resolution, frame rate and codec.")
+            if t.video.quality == .custom {
+                BitrateSlider(kbps: Binding(get: { t.video.bitrate ?? range.medium }, set: { t.video.bitrate = $0 }), range: range)
+            }
         }
         Picker("Resolution", selection: $t.video.resolution) {
             Text(sameAsSource).tag(Int?.none)
@@ -160,12 +175,55 @@ private struct VideoBase: View {
         }
     }
 
+    private var range: BitrateRange {
+        BitrateRange(codec: t.video.codec, format: t.format, resolution: t.video.resolution, frameRate: t.video.frameRate)
+    }
+
     private func label(_ r: Int) -> String {
         switch r {
         case 2160: "2160p (4K)"
         case 1440: "1440p"
         default: "\(r)p"
         }
+    }
+}
+
+/// Video bitrate in kbps, within the range that makes sense for the other settings. The scale is
+/// logarithmic (each step of the slider is the same proportion), with marks for the three presets.
+private struct BitrateSlider: View {
+    @Binding var kbps: Int
+    let range: BitrateRange
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("Bitrate") {
+                HStack(spacing: 8) {
+                    Slider(value: Binding(get: { position(kbps) }, set: { kbps = value($0) }), in: 0...1)
+                        .frame(minWidth: 140)
+                    Text(verbatim: formatKbps(kbps)).monospacedDigit().frame(width: 72, alignment: .trailing)
+                }
+            }
+            HStack {
+                Text(verbatim: range.label(kbps))
+                Spacer()
+                Text(verbatim: "\(formatKbps(range.min)) – \(formatKbps(range.max)) for \(String(range.shortSide))p · \(formatNumber(range.fps)) fps · \(range.codec.title)\(range.assumed ? " source" : "")")
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        // A range that changed (resolution, frame rate, codec) keeps the value inside it.
+        .onChange(of: range.max) { kbps = min(max(kbps, range.min), range.max) }
+        .onChange(of: range.min) { kbps = min(max(kbps, range.min), range.max) }
+        .help(range.assumed ? "With resolution or frame rate “Same as source”, the range is shown for a 1080p, 30 fps source; the bitrate is scaled to the real picture size." : "Bits per second of video. Higher: better quality and larger files.")
+    }
+
+    private func position(_ k: Int) -> Double {
+        let lo = log(Double(range.min)), hi = log(Double(range.max))
+        return min(max((log(Double(max(k, 1))) - lo) / (hi - lo), 0), 1)
+    }
+
+    private func value(_ p: Double) -> Int {
+        let lo = log(Double(range.min)), hi = log(Double(range.max))
+        return min(max(BitrateRange.nice(exp(lo + p * (hi - lo))), range.min), range.max)
     }
 }
 

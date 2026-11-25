@@ -23,6 +23,8 @@ final class Job: Identifiable {
     var detail = ""                    // "1920×1080 · 2:31" once read
     var note: String?                  // an adaptation worth knowing ("Mixed down to stereo…")
     var trashed = false
+    /// Where the original went in the Trash, so Undo can put it back.
+    var trashedTo: URL?
 
     init(url: URL) {
         self.url = url
@@ -174,6 +176,7 @@ final class Converter {
 
     private func run() {
         isRunning = true
+        lastBatch = []
         let cpu = Prefs.cpu
         let folder = Prefs.outputFolder
         let trash = Prefs.trashOriginals
@@ -194,6 +197,7 @@ final class Converter {
             queue.removeAll()
             let finished = batch
             batch = []
+            lastBatch = finished.filter { if case .done = $0.status { true } else { false } }
             isRunning = false
             let ok = finished.filter { if case .done = $0.status { true } else { false } }.count
             let bad = finished.filter { if case .failed = $0.status { true } else { false } }.count
@@ -210,6 +214,45 @@ final class Converter {
 
     func stop() {
         runTask?.cancel()
+    }
+
+    // MARK: Undo
+
+    /// The files the last conversion made, until the next one starts.
+    private var lastBatch: [Job] = []
+
+    /// Files of the last conversion that can still be undone: still in the list, still converted.
+    var undoable: [Job] {
+        guard !isRunning else { return [] }
+        let ids = Set(jobs.map(\.id))
+        return lastBatch.filter { j in
+            guard ids.contains(j.id), case .done = j.status else { return false }
+            return true
+        }
+    }
+
+    /// Undoes the last conversion: the new files are deleted and the originals that went to the
+    /// Trash come back where they were. The rows are ready to convert again.
+    func undoLast() {
+        for job in undoable {
+            guard case .done(let out) = job.status else { continue }
+            // The original comes back first; the new file goes only once the original is safe.
+            if job.trashed {
+                guard let t = job.trashedTo, !FileManager.default.fileExists(atPath: job.url.path),
+                      (try? FileManager.default.moveItem(at: t, to: job.url)) != nil else {
+                    job.note = "Not undone: the original couldn’t be put back from the Trash."
+                    continue
+                }
+                job.trashed = false
+                job.trashedTo = nil
+            }
+            if out.standardizedFileURL.path != job.url.standardizedFileURL.path {
+                try? FileManager.default.removeItem(at: out)
+            }
+            job.status = .ready
+            job.note = nil
+        }
+        lastBatch = []
     }
 
     /// Removes the group's files that aren't converting.
@@ -284,8 +327,10 @@ final class Converter {
             // same file as the result. Never deleted outright.
             if trash, final.standardizedFileURL.path != input.standardizedFileURL.path {
                 do {
-                    try FileManager.default.trashItem(at: input, resultingItemURL: nil)
+                    var inTrash: NSURL?
+                    try FileManager.default.trashItem(at: input, resultingItemURL: &inTrash)
                     job.trashed = true
+                    job.trashedTo = inTrash as URL?
                 } catch {
                     job.note = "Converted, but the original couldn’t be moved to the Trash."
                 }

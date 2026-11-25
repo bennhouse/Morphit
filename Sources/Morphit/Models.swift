@@ -26,7 +26,7 @@ enum MediaKind: String, Codable, CaseIterable, Identifiable {
 
 enum OutputFormat: String, Codable, CaseIterable, Identifiable {
     case mp3, m4a, aac, wav, flac, ogg, opus
-    case mp4, hevc, mkv, mov, webm, gif
+    case mp4, mkv, mov, webm, gif
     case jpg, png, heic, heif, webp, avif, tiff, bmp
 
     var id: String { rawValue }
@@ -34,14 +34,13 @@ enum OutputFormat: String, Codable, CaseIterable, Identifiable {
     var kind: MediaKind {
         switch self {
         case .mp3, .m4a, .aac, .wav, .flac, .ogg, .opus: .audio
-        case .mp4, .hevc, .mkv, .mov, .webm, .gif: .video
+        case .mp4, .mkv, .mov, .webm, .gif: .video
         case .jpg, .png, .heic, .heif, .webp, .avif, .tiff, .bmp: .image
         }
     }
 
     var fileExtension: String {
         switch self {
-        case .hevc: "mp4"
         case .tiff: "tiff"
         default: rawValue
         }
@@ -57,7 +56,6 @@ enum OutputFormat: String, Codable, CaseIterable, Identifiable {
         case .ogg: "OGG Vorbis"
         case .opus: "Opus"
         case .mp4: "MP4"
-        case .hevc: "HEVC (MP4)"
         case .mkv: "MKV"
         case .mov: "MOV"
         case .webm: "WebM"
@@ -84,7 +82,6 @@ enum OutputFormat: String, Codable, CaseIterable, Identifiable {
         case .ogg: "Vorbis in Ogg"
         case .opus: "Opus in Ogg, efficient at low bitrates"
         case .mp4: "H.264, HEVC or AV1 with AAC"
-        case .hevc: "H.265 in MP4, half the size of H.264"
         case .mkv: "Matroska, keeps every track"
         case .mov: "QuickTime: H.264, HEVC or ProRes"
         case .webm: "VP9 or AV1 with Opus, for the web"
@@ -110,7 +107,6 @@ enum OutputFormat: String, Codable, CaseIterable, Identifiable {
     var videoCodecs: [VideoCodec] {
         switch self {
         case .mp4: [.h264, .hevc, .av1]
-        case .hevc: [.hevc]
         case .mkv: [.h264, .hevc, .av1, .vp9]
         case .mov: [.h264, .hevc, .prores]
         case .webm: [.vp9, .av1]
@@ -199,7 +195,7 @@ enum VideoCodec: String, Codable, CaseIterable, Identifiable {
 }
 
 enum VideoQuality: String, Codable, CaseIterable, Identifiable {
-    case source, high, medium, low
+    case source, high, medium, low, custom
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -207,8 +203,57 @@ enum VideoQuality: String, Codable, CaseIterable, Identifiable {
         case .high: "High"
         case .medium: "Medium"
         case .low: "Small file"
+        case .custom: "Custom bitrate"
         }
     }
+}
+
+/// Sensible video bitrates for a resolution, frame rate and codec: from a small file to very high
+/// quality, in bits per pixel (H.264 values; newer codecs need less for the same quality).
+struct BitrateRange {
+    let min: Int, small: Int, medium: Int, high: Int, max: Int   // kbps
+    let shortSide: Int, fps: Double, codec: VideoCodec
+    /// Resolution or frame rate "same as source": the range is shown for 1080p / 30 fps.
+    let assumed: Bool
+
+    static let referencePixels = 1920.0 * 1080
+
+    init(codec: VideoCodec?, format: OutputFormat, resolution: Int?, frameRate: Double?) {
+        let c = codec ?? format.videoCodecs.first ?? .h264
+        self.codec = c
+        shortSide = resolution ?? 1080
+        fps = frameRate ?? 30
+        assumed = resolution == nil || frameRate == nil
+        let pixels = Double(shortSide) * Double(shortSide) * 16 / 9
+        // More frames need more bits, but less than in proportion (frames are alike).
+        let effectiveFPS = 30 * pow(fps / 30, 0.75)
+        let efficiency: Double = switch c {
+        case .h264, .prores: 1
+        case .hevc: 0.6
+        case .av1: 0.5
+        case .vp9: 0.65
+        }
+        func kbps(_ bpp: Double) -> Int { BitrateRange.nice(pixels * effectiveFPS * bpp * efficiency / 1000) }
+        min = kbps(0.025); small = kbps(0.05); medium = kbps(0.09); high = kbps(0.14); max = kbps(0.3)
+    }
+
+    /// Rounded to a step that suits the size.
+    static func nice(_ k: Double) -> Int {
+        let step: Double = k < 1000 ? 50 : k < 10000 ? 100 : 500
+        return Swift.max(Int(step), Int((k / step).rounded() * step))
+    }
+
+    func label(_ kbps: Int) -> String {
+        if kbps < small { return "Very small file" }
+        if kbps < (small + medium) / 2 { return "Small file" }
+        if kbps < (medium + high) / 2 { return "Medium quality" }
+        if kbps < (high + max) / 2 { return "High quality" }
+        return "Very high quality"
+    }
+}
+
+func formatKbps(_ k: Int) -> String {
+    k >= 1000 ? String(format: "%g Mbps", (Double(k) / 100).rounded() / 10) : "\(k) kbps"
 }
 
 enum EncoderChoice: String, Codable, CaseIterable, Identifiable {
@@ -258,6 +303,7 @@ struct VideoSettings: Codable, Equatable {
     var encoder: EncoderChoice = .auto
     var speed: EncoderSpeed = .medium
     var crf: Int?                 // overrides the quality preset (software encoders)
+    var bitrate: Int?             // kbps, with quality .custom
     var allAudioTracks = true
     var keepSubtitles = true
     var keepMetadata = true
@@ -278,6 +324,7 @@ struct VideoSettings: Codable, Equatable {
         encoder = c.value(.encoder, .auto)
         speed = c.value(.speed, .medium)
         crf = c.value(.crf, nil)
+        bitrate = c.value(.bitrate, nil)
         allAudioTracks = c.value(.allAudioTracks, true)
         keepSubtitles = c.value(.keepSubtitles, true)
         keepMetadata = c.value(.keepMetadata, true)
@@ -389,10 +436,13 @@ struct ConversionTemplate: Codable, Identifiable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = c.value(.id, UUID())
         name = c.value(.name, "Template")
-        format = c.value(.format, .mp3)
+        let rawFormat: String = c.value(.format, "mp3")
+        format = OutputFormat(rawValue: rawFormat) ?? (rawFormat == "hevc" ? .mp4 : .mp3)
         audio = c.value(.audio, AudioSettings())
         video = c.value(.video, VideoSettings())
         image = c.value(.image, ImageSettings())
+        // The old "HEVC (MP4)" format is MP4 with the HEVC codec.
+        if rawFormat == "hevc", video.codec == nil { video.codec = .hevc }
     }
 
     /// Same parameters (ignores id and name).
@@ -413,7 +463,8 @@ struct ConversionTemplate: Codable, Identifiable, Equatable {
             if audio.channels != .source { parts.append(audio.channels.title) }
         case .video:
             if format != .gif { parts.append(video.codec?.title ?? "codec as source") }
-            if video.quality != .source { parts.append("\(video.quality.title) quality") }
+            if video.quality == .custom, let b = video.bitrate { parts.append(formatKbps(b)) }
+            else if video.quality != .source { parts.append("\(video.quality.title) quality") }
             parts.append(video.resolution.map { "\($0)p" } ?? "size as source")
             if let f = video.frameRate { parts.append(String(format: "%g fps", f)) }
             if video.audio == .remove && format != .gif { parts.append("no audio") }
@@ -438,7 +489,6 @@ struct ConversionTemplate: Codable, Identifiable, Equatable {
             .init(name: "FLAC", format: .flac),
             .init(name: "Opus", format: .opus),
             .init(name: "MP4", format: .mp4),
-            .init(name: "HEVC", format: .hevc),
             .init(name: "MKV", format: .mkv),
             .init(name: "MOV", format: .mov),
             .init(name: "WebM", format: .webm),

@@ -17,14 +17,31 @@ final class TemplateStore {
     }
 
     private init() {
-        if let data = try? Data(contentsOf: Self.file), let list = try? JSONDecoder().decode([ConversionTemplate].self, from: data), !list.isEmpty {
-            templates = list
+        if var data = try? Data(contentsOf: Self.file) {
+            // The old built-in "HEVC" template (format "HEVC (MP4)", no longer offered: MP4 holds
+            // HEVC) goes, if it was never changed. A changed one becomes MP4 with HEVC.
+            if var raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                raw.removeAll { ($0["format"] as? String) == "hevc" && ($0["name"] as? String) == "HEVC"
+                    && (($0["video"] as? [String: Any]).map { ($0["quality"] as? String ?? "source") == "source" && $0["codec"] == nil && $0["resolution"] == nil } ?? true) }
+                if let d = try? JSONSerialization.data(withJSONObject: raw) { data = d }
+            }
+            templates = (try? JSONDecoder().decode([ConversionTemplate].self, from: data)) ?? ConversionTemplate.builtIn
         } else {
             templates = ConversionTemplate.builtIn
         }
+        // Development aid with MORPHIT_SNAPSHOT: MORPHIT_DEMO_TEMPLATE='<template JSON>' shows that
+        // template first and selected, and nothing is saved.
+        if let json = ProcessInfo.processInfo.environment["MORPHIT_DEMO_TEMPLATE"],
+           let t = try? JSONDecoder().decode(ConversionTemplate.self, from: Data(json.utf8)) {
+            Self.demo = t.id
+            templates.insert(t, at: 0)
+        }
     }
 
+    private static var demo: UUID?
+
     private func save() {
+        guard Self.demo == nil else { return }
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? enc.encode(templates) { try? data.write(to: Self.file, options: .atomic) }
     }
@@ -59,15 +76,24 @@ final class TemplateStore {
         return copy
     }
 
-    func delete(_ t: ConversionTemplate) {
-        templates.removeAll { $0.id == t.id }
-        if templates.isEmpty { templates = ConversionTemplate.builtIn }
+    /// Removes any template, built-in ones included. With an undo manager, ⌘Z puts it back in
+    /// the same place (and ⇧⌘Z removes it again).
+    func delete(_ t: ConversionTemplate, undoManager: UndoManager? = nil) {
+        guard let i = templates.firstIndex(where: { $0.id == t.id }) else { return }
+        templates.remove(at: i)
+        undoManager?.registerUndo(withTarget: self) { store in
+            MainActor.assumeIsolated { store.restore(t, at: i, undoManager: undoManager) }
+        }
+        undoManager?.setActionName("Delete Template")
     }
 
-    func restoreDefaults() {
-        // Adds back the built-in templates that are missing (by name); user templates stay.
-        let names = Set(templates.map(\.name))
-        for t in ConversionTemplate.builtIn where !names.contains(t.name) { add(t) }
+    private func restore(_ t: ConversionTemplate, at i: Int, undoManager: UndoManager?) {
+        templates.insert(t, at: min(i, templates.count))
+        undoManager?.registerUndo(withTarget: self) { store in
+            MainActor.assumeIsolated { store.delete(t, undoManager: undoManager) }
+        }
+        undoManager?.setActionName("Delete Template")
+        NotificationCenter.default.post(name: .templateRestored, object: t.id)
     }
 
     func uniqueName(_ name: String) -> String {
@@ -79,7 +105,7 @@ final class TemplateStore {
     }
 
     var selectedID: UUID? {
-        get { UserDefaults.standard.string(forKey: "selectedTemplate").flatMap(UUID.init) }
+        get { Self.demo ?? UserDefaults.standard.string(forKey: "selectedTemplate").flatMap(UUID.init) }
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: "selectedTemplate") }
     }
 }
@@ -101,4 +127,9 @@ enum Notifier {
         content.sound = .default
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
+}
+
+extension Notification.Name {
+    /// A deleted template came back (undo): Settings selects it.
+    static let templateRestored = Notification.Name("MorphitTemplateRestored")
 }

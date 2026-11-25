@@ -123,6 +123,12 @@ struct ContentView: View {
             // MORPHIT_SNAPSHOT_CONVERT=1: converts everything 4 s after launch, to see the rows afterwards.
             if env["MORPHIT_SNAPSHOT"] != nil, env["MORPHIT_SNAPSHOT_CONVERT"] != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { convertAll() }
+                // MORPHIT_SNAPSHOT_UNDO=<s>: then presses Undo that many seconds after launch.
+                if let t = env["MORPHIT_SNAPSHOT_UNDO"].flatMap(Double.init) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + t) {
+                        withAnimation(.smooth(duration: 0.3)) { converter.undoLast() }
+                    }
+                }
             }
         }
     }
@@ -131,7 +137,7 @@ struct ContentView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 17)).frame(width: 22)
+                SpinningIcon(running: converter.isRunning)
                 Text("Morphit").font(.system(size: 17, weight: .bold))
             }
             .padding(.leading, 6)
@@ -142,7 +148,6 @@ struct ContentView: View {
             Button { converter.clear(converter.jobs) } label: { Label("Clear List", systemImage: "xmark.circle").toolbarIcon() }
                 .help("Remove every file that isn’t converting")
                 .disabled(converter.jobs.isEmpty)
-            DestinationMenu()
             if converter.isRunning {
                 Button { converter.stop() } label: { Label("Stop", systemImage: "stop.fill").toolbarIcon() }
                     .help("Stop converting (⌘.)")
@@ -492,6 +497,11 @@ struct Footer: View {
             Divider()
             HStack(spacing: 14) {
                 status.layoutPriority(-1)
+                if !converter.undoable.isEmpty {
+                    UndoButton { withAnimation(.smooth(duration: 0.3)) { converter.undoLast() } }
+                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                                removal: .opacity))
+                }
                 Spacer(minLength: 8)
                 Label(outputFolder.isEmpty ? "Next to originals" : URL(fileURLWithPath: outputFolder).lastPathComponent, systemImage: "folder")
                     .help("Converted files go \(outputFolder.isEmpty ? "next to the originals" : "to " + outputFolder)")
@@ -500,6 +510,9 @@ struct Footer: View {
             .tone(.secondary)
             .padding(.horizontal, 12)
             .frame(height: Layout.footerHeight - 1)
+            .clipped()
+            // Undo rises in once the conversion has ended.
+            .animation(.smooth(duration: 0.35).delay(0.15), value: converter.undoable.isEmpty)
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -525,32 +538,87 @@ struct Footer: View {
     }
 }
 
-/// Where the converted files go, in the toolbar.
-struct DestinationMenu: View {
-    @AppStorage("outputFolder") private var outputFolder: String = ""
+/// Small capsule button in the status bar that undoes the last conversion.
+struct UndoButton: View {
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            Label("Undo", systemImage: "arrow.uturn.backward")
+                .font(.callout)
+                .padding(.horizontal, 9).padding(.vertical, 3)
+                .background(Capsule().fill(Color.primary.opacity(hover ? 0.12 : 0.07)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .tone(.primary)
+        .onHover { hover = $0 }
+        .help("Undo the conversion: delete the new files and put the originals back")
+    }
+}
+
+/// The title bar icon: turns clockwise while converting, speeding up at the start (ease-in) and
+/// slowing down to rest upright at the end (ease-out).
+struct SpinningIcon: View {
+    let running: Bool
+    @State private var spin = Spin()
+    @State private var active = false
 
     var body: some View {
-        Menu {
-            Picker("Save to", selection: $outputFolder) {
-                Text("Next to the Originals").tag("")
-                if !outputFolder.isEmpty { Text(URL(fileURLWithPath: outputFolder).lastPathComponent).tag(outputFolder) }
-            }
-            .pickerStyle(.inline)
-            Button("Choose Folder…") { chooseFolder() }
-        } label: {
-            Label("Destination", systemImage: "folder").toolbarIcon()
+        TimelineView(.animation(paused: !active)) { ctx in
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 17))
+                .rotationEffect(.degrees(spin.step(ctx.date) {
+                    DispatchQueue.main.async { if !running { active = false } }
+                }))
         }
-        .menuIndicator(.hidden)
-        .help("Where the converted files go")
+        .frame(width: 22)
+        .onChange(of: running, initial: true) {
+            spin.running = running
+            if running { if !active { spin.last = nil }; active = true }
+        }
     }
 
-    private func chooseFolder() {
-        let p = NSOpenPanel()
-        p.canChooseDirectories = true
-        p.canChooseFiles = false
-        p.canCreateDirectories = true
-        p.prompt = "Choose"
-        p.message = "Converted files will be saved in this folder"
-        if p.runModal() == .OK, let u = p.url { outputFolder = u.path }
+    /// Angle and speed, advanced on each frame (not observed: the timeline redraws).
+    final class Spin {
+        var running = false
+        var last: Date?
+        private var angle = 0.0          // degrees, clockwise
+        private var speed = 0.0          // degrees per second
+        private let top = 300.0          // a turn in 1.2 s
+        private let accel = 500.0        // full speed in 0.6 s
+        /// The slow-down: from `from`, `distance` degrees in `duration` seconds, easing out.
+        private var brake: (start: Date, from: Double, distance: Double, duration: Double)?
+
+        func step(_ now: Date, rested: () -> Void) -> Double {
+            let dt = last.map { min(max(now.timeIntervalSince($0), 0), 0.05) } ?? 0
+            last = now
+            if running {
+                brake = nil
+                speed = min(top, speed + accel * dt)
+                angle += speed * dt
+                if angle >= 360 { angle -= 360 }
+            } else if speed > 0 || brake != nil {
+                if brake == nil {
+                    // Stops upright on a half turn (the two arrows look the same every 180°), in
+                    // 0.4–0.9 s whatever the speed, starting at about the speed it had.
+                    let stop = ((angle + max(speed, 60) * 0.3) / 180).rounded(.up) * 180
+                    let d = stop - angle
+                    brake = (now, angle, d, min(max(2 * d / max(speed, 1), 0.4), 0.9))
+                }
+                let b = brake!
+                let u = min(now.timeIntervalSince(b.start) / b.duration, 1)
+                angle = b.from + b.distance * (1 - (1 - u) * (1 - u))
+                speed = 2 * b.distance / b.duration * (1 - u)
+                if u >= 1 {
+                    angle = (b.from + b.distance).truncatingRemainder(dividingBy: 360)   // 0 or 180: same look
+                    speed = 0; brake = nil
+                    rested()
+                }
+            } else {
+                rested()
+            }
+            return angle
+        }
     }
 }

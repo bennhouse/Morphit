@@ -75,7 +75,7 @@ enum CLI {
                 full.audio.bitrate = 192; full.audio.sampleRate = 48000; full.audio.channels = .mono; full.audio.bitDepth = 24
                 full.audio.m4aCodec = .alac; full.audio.normalize = true; full.audio.bitrateMode = .variable
                 full.video.codec = .av1; full.video.quality = .low; full.video.resolution = 720; full.video.frameRate = 29.97
-                full.video.audio = .reencode; full.video.audioBitrate = 96; full.video.crf = 30; full.video.encoder = .software
+                full.video.audio = .reencode; full.video.audioBitrate = 96; full.video.crf = 30; full.video.encoder = .software; full.video.bitrate = 4000
                 full.image.quality = 70; full.image.resize = .megapixels; full.image.resizeValue = 2.5; full.image.metadata = .removeLocation
                 full.image.color = .sRGB; full.image.tiffCompression = .none; full.image.lossless = true; full.image.enlarge = true
                 b.templates.append(full)

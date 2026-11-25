@@ -44,6 +44,8 @@ struct SettingsView: View {
             SettingsPreload.hideIfPreloading(w)
         })
         .onChange(of: tab) { resize(animated: true) }
+        // No scroll bars: with "Always show" they took space and the lists changed width.
+        .scrollIndicators(.never)
         .onAppear {
             takeRequest()
             // Development aid with MORPHIT_SNAPSHOT: MORPHIT_SNAPSHOT_CYCLE=1 switches tab every 2 s.
@@ -71,14 +73,18 @@ struct SettingsView: View {
     }
 
     /// Hides the content, resizes the window (AppKit, ease-in-out), then fades the new content in.
-    /// The top edge stays in place.
+    /// The top edge and the horizontal centre stay in place.
     private func resize(animated: Bool) {
         guard let w = window else { return }
         let target = size(tab)
         let chromeH = w.frame.height - w.contentLayoutRect.height
         let chromeW = w.frame.width - w.contentLayoutRect.width
         let newSize = CGSize(width: target.width + chromeW, height: target.height + chromeH)
-        let frame = NSRect(x: w.frame.minX, y: w.frame.maxY - newSize.height, width: newSize.width, height: newSize.height)
+        // Centred on the old frame, so the tab buttons (centred in the toolbar) stay put.
+        var frame = NSRect(x: (w.frame.midX - newSize.width / 2).rounded(), y: w.frame.maxY - newSize.height, width: newSize.width, height: newSize.height)
+        if let screen = w.screen?.visibleFrame {   // never pushed off the screen's sides
+            frame.origin.x = min(max(frame.minX, screen.minX), screen.maxX - frame.width)
+        }
         guard animated, w.isVisible, newSize != w.frame.size else {
             w.setFrame(frame, display: true)
             contentOpacity = 1
@@ -274,7 +280,7 @@ struct GeneralSettings: View {
 struct TemplatesSettings: View {
     @State private var store = TemplateStore.shared
     @State private var selection: UUID?
-    @State private var confirmDelete = false
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         HStack(spacing: 0) {
@@ -297,7 +303,8 @@ struct TemplatesSettings: View {
                 .environment(\.defaultMinListRowHeight, 22)
                 .scrollIndicators(.never)
                 Divider()
-                HStack(spacing: 2) {
+                // Three buttons of the same size, evenly spaced, like the +/− bars of System Settings.
+                HStack(spacing: 6) {
                     Menu {
                         ForEach(MediaKind.allCases) { kind in
                             Section(kind.title) {
@@ -306,18 +313,16 @@ struct TemplatesSettings: View {
                                 }
                             }
                         }
-                    } label: { Image(systemName: "plus") }
+                    } label: { BarIcon(symbol: "plus") }
+                    .menuStyle(.button)
                     .menuIndicator(.hidden)
+                    .fixedSize()
                     .help("New template")
-                    Button { if let t = selected { selection = store.duplicate(t).id } } label: { Image(systemName: "plus.square.on.square") }
+                    Button { if let t = selected { selection = store.duplicate(t).id } } label: { BarIcon(symbol: "plus.square.on.square") }
                         .help("Duplicate").disabled(selected == nil)
-                    Button { confirmDelete = true } label: { Image(systemName: "minus") }
-                        .help("Delete").disabled(selected == nil)
+                    Button { deleteSelected() } label: { BarIcon(symbol: "minus") }
+                        .help("Delete (⌘Z puts it back)").disabled(selected == nil)
                     Spacer()
-                    Menu {
-                        Button("Add Missing Built-in Templates") { store.restoreDefaults() }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                    .menuIndicator(.hidden)
                 }
                 .buttonStyle(.borderless)
                 .fixedSize(horizontal: false, vertical: true)
@@ -333,16 +338,17 @@ struct TemplatesSettings: View {
             }
         }
         .onAppear { if selection == nil { selection = store.selectedID ?? store.templates.first?.id } }
-        .confirmationDialog("Delete “\(selected?.name ?? "")”?", isPresented: $confirmDelete) {
-            Button("Delete", role: .destructive) {
-                guard let t = selected else { return }
-                let i = store.templates.firstIndex(of: t) ?? 0
-                store.delete(t)
-                selection = store.templates[min(i, store.templates.count - 1)].id
-            }
-        } message: {
-            Text("The template is removed. Files already converted with it stay as they are.")
+        .onReceive(NotificationCenter.default.publisher(for: .templateRestored)) { note in
+            if let id = note.object as? UUID { selection = id }
         }
+    }
+
+    /// Deletes at once (built-in templates too); ⌘Z puts it back. The next template is selected.
+    private func deleteSelected() {
+        guard let t = selected else { return }
+        let i = store.templates.firstIndex(of: t) ?? 0
+        store.delete(t, undoManager: undoManager)
+        selection = store.templates.isEmpty ? nil : store.templates[min(i, store.templates.count - 1)].id
     }
 
     private var selected: ConversionTemplate? { store.template(selection) }
@@ -350,6 +356,18 @@ struct TemplatesSettings: View {
     private var selectedBinding: Binding<ConversionTemplate>? {
         guard let t = selected else { return nil }
         return Binding(get: { store.template(t.id) ?? t }, set: { store.update($0) })
+    }
+}
+
+/// An icon of the templates bar: every symbol in the same box, centred, so the buttons line up.
+private struct BarIcon: View {
+    let symbol: String
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 12, weight: .medium))
+            .frame(width: 22, height: 18)
+            .contentShape(Rectangle())
+            .tone(.secondary)   // the + menu otherwise drew brighter than the two buttons
     }
 }
 

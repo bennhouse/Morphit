@@ -32,7 +32,7 @@ enum Snapshots {
                         guard let b = w[kCGWindowBounds as String] as? [String: Any] else { return nil }
                         let on = (w[kCGWindowIsOnscreen as String] as? Bool) == true
                         let alpha = w[kCGWindowAlpha as String] as? Double ?? 1
-                        return "\(Int(b["Width"] as? Double ?? 0))x\(Int(b["Height"] as? Double ?? 0))\(on ? "" : "(off)")\(alpha < 1 ? String(format: "(a%.1f)", alpha) : "")"
+                        return "\(Int(b["Width"] as? Double ?? 0))x\(Int(b["Height"] as? Double ?? 0))@\(Int(b["X"] as? Double ?? 0))\(on ? "" : "(off)")\(alpha < 1 ? String(format: "(a%.1f)", alpha) : "")"
                     }.joined(separator: " ")
                     h?.write(Data(String(format: "%.3f %@\n", Date().timeIntervalSince(start), line).utf8))
                     // MORPHIT_FRAMELOG=burst: also the real pixels of each window opened after launch,
