@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- New icon, redrawn with the rest of the suite from one shared design (same glass parts, light, shadows and safe area on every icon).
+- In each group's header the X comes before Play (X left, Play right).
+- The title bar's clear button is now **Clear Finished**, with an eraser symbol: it removes the files that have been through a conversion (converted, failed or stopped) and is enabled only when there are some. Files not yet converted stay.
 - Settings: switching tabs resizes the window around its centre, so the tab buttons stay put.
 - No scroll bars in lists (with "Always show" they took space and changed the lists' width).
 - The icon next to the title turns clockwise while converting, easing in at the start and out at the end.

@@ -7,8 +7,8 @@ Morphit converts audio, video and images. It is a single window: drop files or f
 ## How it works
 
 1. **Files.** Drop files or folders on the window or the Dock icon, use **+** (⌘O), or *Open With › Morphit* in Finder. Folders are searched for media. Each row shows size, codec and duration, then the progress, the result (the small folder shows it in Finder) or the reason for a failure. ✕ removes a file from the list.
-2. **Groups.** Each group has its template menu, with only the templates its files can become (video files can also take an audio template: the sound is extracted). On the right: the count, ⚙︎ the group's settings (the everyday ones, then **Advanced settings**; **Save** puts changes into the template or into a new one), ▶ converts just this group, ⊗ removes its files.
-3. **Toolbar.** **+** add, ⊗ clear the list, the folder icon for where files go (next to the originals, or a folder), ▶ **Convert All** (⌘↩): every group with its own template; ■ Stop (⌘.). The status bar at the bottom sums up the list. The CPU level is in Settings.
+2. **Groups.** Each group has its template menu, with only the templates its files can become (video files can also take an audio template: the sound is extracted). On the right: the count, ⚙︎ the group's settings (the everyday ones, then **Advanced settings**; **Save** puts changes into the template or into a new one), ⊗ removes its files, ▶ converts just this group.
+3. **Toolbar.** **+** add, **Clear Finished** (the eraser) removes the files already through a conversion (converted, failed or stopped), ▶ **Convert All** (⌘↩): every group with its own template; ■ Stop (⌘.). The icon next to the title turns while converting. The status bar at the bottom sums up the list; after a conversion an **Undo** button rises into it, which deletes the new files and puts the originals back from the Trash. Where files go, and the CPU level, are in Settings.
 
 An existing file is never replaced: the new one gets " 2", " 3"…. Files are written under a hidden temporary name and renamed when complete, so a stopped conversion leaves nothing behind.
 
@@ -44,7 +44,7 @@ Video encoders: H.264 and HEVC use the Mac's hardware encoder (VideoToolbox) by 
 ## Settings (⌘,)
 
 - **General.** Where converted files go. CPU usage: *Low* (one file at a time on two cores, low priority), *Balanced* (half the performance cores' worth of files, half the cores), *Maximum* (one file per performance core, all cores). *Move originals to the Trash after converting*, off by default: only after the converted file is complete and renamed, never on failure or Stop, never deleted outright. *Settings and templates*: **Export…** saves these settings and every template in one JSON file; **Import…** reads one back (the general settings are replaced; the templates replace yours or are added to them).
-- **Templates.** Create (+, by format), duplicate, delete; name, format and parameters, with the technical ones under **Advanced settings**. Saved in `~/Library/Application Support/Morphit/templates.json`. *Add Missing Built-in Templates* brings back the starting set (MP3, M4A 256 kbps stereo, WAV, FLAC, Opus, MP4, HEVC, MKV, MOV, WebM, GIF, JPEG, PNG, HEIC, WebP, AVIF, TIFF).
+- **Templates.** Create (+, by format), duplicate, delete (− deletes any template, built-in ones too; ⌘Z puts it back); name, format and parameters, with the technical ones under **Advanced settings**. Saved in `~/Library/Application Support/Morphit/templates.json`. *Add Missing Built-in Templates* brings back the starting set (MP3, M4A 256 kbps stereo, WAV, FLAC, Opus, MP4, MKV, MOV, WebM, GIF, JPEG, PNG, HEIC, WebP, AVIF, TIFF).
 
 ## Tools inside the app
 

@@ -145,9 +145,11 @@ struct ContentView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             Button { MainActions.openPanel() } label: { Label("Add Files", systemImage: "plus").toolbarIcon() }
                 .help("Add files or folders (⌘O)")
-            Button { converter.clear(converter.jobs) } label: { Label("Clear List", systemImage: "xmark.circle").toolbarIcon() }
-                .help("Remove every file that isn’t converting")
-                .disabled(converter.jobs.isEmpty)
+            Button { converter.clearFinished() } label: { Label("Clear Finished", systemImage: "eraser").toolbarIcon() }
+                .help("Remove the files that have been converted (or failed or were stopped) from the list")
+                // Only once some file has been through a conversion (done, failed, skipped or
+                // stopped): before that there is nothing to tidy away.
+                .disabled(!converter.jobs.contains(where: \.isFinished))
             if converter.isRunning {
                 Button { converter.stop() } label: { Label("Stop", systemImage: "stop.fill").toolbarIcon() }
                     .help("Stop converting (⌘.)")
@@ -308,6 +310,8 @@ struct GroupCard: View {
                 .help(model.draft(k).map { "Settings for this group: \($0.summary)" } ?? "Settings for this group")
                 .disabled(model.draft(k) == nil)
                 .popover(isPresented: $showAdvanced, arrowEdge: .bottom) { advanced(k) }
+            // X on the left, Play on the right.
+            clearGroupButton
             if let d = model.draft(k) {
                 Button { converter.enqueue(group.jobs, d) } label: { Image(systemName: "play.fill") }
                     .buttonStyle(.borderless)
@@ -317,7 +321,11 @@ struct GroupCard: View {
         } else {
             Spacer(minLength: 6)
             Text("Not audio, video or images").font(.callout).tone(.secondary)
+            clearGroupButton
         }
+    }
+
+    private var clearGroupButton: some View {
         Button { converter.clear(group.jobs) } label: { Image(systemName: "xmark.circle") }
             .buttonStyle(.borderless)
             .help("Remove these files from the list")
